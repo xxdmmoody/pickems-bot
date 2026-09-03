@@ -1,0 +1,40 @@
+{
+  "name": "pickems-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Discord bot for weekly NFL pick'em: over, under, favorite, underdog",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/index.js",
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "espn:smoke": "tsx scripts/espn-smoke.ts",
+    "emojis:upload": "tsx scripts/upload-emojis.ts",
+    "commands:register": "tsx scripts/register-commands.ts",
+    "preview": "tsx scripts/preview.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "discord.js": "^14.27.0",
+    "dotenv": "^17.4.2",
+    "luxon": "^3.7.2",
+    "node-cron": "^4.6.0",
+    "pino": "^9.5.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/luxon": "^3.4.2",
+    "@types/node": "^22.10.0",
+    "pino-pretty": "^13.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.4"
+  }
+}

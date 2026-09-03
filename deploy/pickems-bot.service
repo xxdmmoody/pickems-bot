@@ -1,0 +1,37 @@
+[Unit]
+Description=PicksBot - NFL pick'em Discord bot
+Documentation=https://github.com/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Adjust these three to match the install.
+User=pi
+WorkingDirectory=/home/pi/pickems-bot
+ExecStart=/usr/bin/node dist/src/index.js
+
+EnvironmentFile=/home/pi/pickems-bot/.env
+
+Restart=always
+RestartSec=10
+# Give up only if it fails repeatedly in a short window, so a bad deploy is
+# visible in the logs instead of looping forever.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Logs are JSON on stdout; journald keeps them structured.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pickems-bot
+
+# The bot only needs its own directory and outbound network.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/pi/pickems-bot/data
+
+[Install]
+WantedBy=multi-user.target
