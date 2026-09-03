@@ -5,6 +5,8 @@ import {
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
   type Client,
+  type Role,
+  type TextChannel,
 } from 'discord.js';
 import type { Repos } from '../db/repos.js';
 import { TEAMS, nickname } from '../domain/teams.js';
@@ -12,6 +14,14 @@ import type { EspnClient } from '../espn/client.js';
 import { logger } from '../logger.js';
 import { renderResults, renderStandings } from '../render/results.js';
 import { renderSchedule } from '../render/schedule.js';
+import {
+  buildJoinRow,
+  renderJoinPrompt,
+  renderSetupSummary,
+  resolveSetupChannel,
+  resolveSetupRole,
+  toggleParticipation,
+} from './onboarding.js';
 import { gradeWeek } from '../services/grade.js';
 import { participantIds } from '../services/participants.js';
 import { describeSlate, findIncomplete } from '../services/picks.js';
@@ -31,22 +41,27 @@ const weekOption = (required: boolean) => (option: any) =>
 export const commandDefinitions = [
   new SlashCommandBuilder()
     .setName('setup')
-    .setDescription('Configure the channel and participant role for this server')
+    .setDescription('Set up the bot — creates a channel and role for you if you have none')
     .setDefaultMemberPermissions(adminOnly)
     .addChannelOption((o) =>
       o
         .setName('channel')
-        .setDescription('Channel the bot posts picks and results in')
+        .setDescription('Existing channel to post in (default: find or create #pickems)')
         .addChannelTypes(ChannelType.GuildText)
-        .setRequired(true)
+        .setRequired(false)
     )
     .addRoleOption((o) =>
-      o.setName('role').setDescription('Role held by everyone playing').setRequired(true)
+      o
+        .setName('role')
+        .setDescription('Existing players role (default: find or create @Pickems)')
+        .setRequired(false)
     )
     .addStringOption((o) =>
       o.setName('timezone').setDescription('IANA timezone, e.g. America/Chicago').setRequired(false)
     ),
 
+  new SlashCommandBuilder().setName('join').setDescription('Join the pick’em pool'),
+  new SlashCommandBuilder().setName('leave').setDescription('Leave the pick’em pool'),
   new SlashCommandBuilder().setName('mypicks').setDescription('Show your picks for this week'),
   new SlashCommandBuilder().setName('standings').setDescription('Show the season standings'),
   new SlashCommandBuilder().setName('schedule').setDescription('Show this week’s matchups and lines'),
@@ -100,6 +115,10 @@ export async function handleCommand(
     switch (interaction.commandName) {
       case 'setup':
         return await handleSetup(interaction, ctx);
+      case 'join':
+        return await handleParticipation(interaction, ctx, 'join');
+      case 'leave':
+        return await handleParticipation(interaction, ctx, 'leave');
       case 'mypicks':
         return await handleMyPicks(interaction, ctx);
       case 'standings':
@@ -157,28 +176,82 @@ function resolveWeek(
 
 /* ----------------------------------------------------------------- handlers */
 
+/**
+ * Sets the bot up, creating the channel and role when the admin has none.
+ *
+ * Both options are optional: with neither, the bot finds or creates #pickems and
+ * @Pickems, so onboarding is a single command with no prerequisites. Naming an
+ * existing channel or role still works and skips creation.
+ */
 async function handleSetup(interaction: ChatInputCommandInteraction, ctx: CommandContext): Promise<void> {
-  const channel = interaction.options.getChannel('channel', true);
-  const role = interaction.options.getRole('role', true);
   const timezone = interaction.options.getString('timezone') ?? ctx.defaultTimezone;
-
   if (!isValidTimezone(timezone)) {
     await respond(interaction, `❌ \`${timezone}\` is not a valid IANA timezone.`);
     return;
   }
 
+  const guild = interaction.guild;
+  if (!guild) return;
+
+  // Creating a channel or role can take a moment; defer so the token holds.
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const providedChannel = interaction.options.getChannel('channel') as TextChannel | null;
+  const channelResult = await resolveSetupChannel(guild, providedChannel);
+  if (!channelResult.ok) {
+    await respond(interaction, `❌ ${channelResult.reason}`);
+    return;
+  }
+
+  const providedRole = interaction.options.getRole('role');
+  const roleResult = await resolveSetupRole(guild, providedRole as Role | null);
+  if (!roleResult.ok) {
+    await respond(interaction, `❌ ${roleResult.reason}`);
+    return;
+  }
+
+  const channel = channelResult.value;
+  const role = roleResult.value;
+
   ctx.repos.guilds.upsert({
-    guildId: interaction.guildId!,
+    guildId: guild.id,
     channelId: channel.id,
     roleId: role.id,
     timezone,
   });
 
+  // A persistent join button means players enrol themselves rather than an admin
+  // handing out the role one by one.
+  try {
+    const prompt = await channel.send({
+      content: renderJoinPrompt(role.id),
+      components: [buildJoinRow()],
+    });
+    await prompt.pin().catch(() => undefined);
+  } catch (error) {
+    logger.warn({ guildId: guild.id, err: String(error) }, 'could not post the join prompt');
+  }
+
   await respond(
     interaction,
-    `✅ Set up. Picks will post in <#${channel.id}>, tagging <@&${role.id}>, on ${timezone} time.\n` +
-      'Run `/openweek` when you are ready to post the first week.'
+    renderSetupSummary(channel, role, timezone, channelResult.action, roleResult.action)
   );
+}
+
+/** `/join` and `/leave` — the command equivalents of the join button. */
+async function handleParticipation(
+  interaction: ChatInputCommandInteraction,
+  ctx: CommandContext,
+  action: 'join' | 'leave'
+): Promise<void> {
+  const config = requireConfig(interaction, ctx);
+  if (!config || !interaction.guild) {
+    await respond(interaction, 'This server is not set up yet — an admin needs to run `/setup`.');
+    return;
+  }
+
+  const message = await toggleParticipation(interaction.guild, config.roleId, interaction.user.id, action);
+  await respond(interaction, message);
 }
 
 async function handleMyPicks(interaction: ChatInputCommandInteraction, ctx: CommandContext): Promise<void> {

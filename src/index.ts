@@ -6,6 +6,12 @@ import { openDatabase } from './db/index.js';
 import { createRepos } from './db/repos.js';
 import { EspnClient } from './espn/client.js';
 import { handleCommand } from './interactions/commands.js';
+import {
+  findWelcomeChannel,
+  handleJoinButton,
+  renderWelcome,
+  JOIN_BUTTON_ID,
+} from './interactions/onboarding.js';
 import { handlePickSelect } from './interactions/pick.js';
 import { startScheduler } from './jobs/scheduler.js';
 import { logger } from './logger.js';
@@ -46,6 +52,12 @@ async function main(): Promise<void> {
       // collectors, so week-old messages keep working across restarts.
       if (interaction.isStringSelectMenu()) {
         await handlePickSelect(interaction, repos, config.DEFAULT_TIMEZONE);
+        return;
+      }
+
+      // The pinned join button, for the same reason.
+      if (interaction.isButton() && interaction.customId === JOIN_BUTTON_ID) {
+        await handleJoinButton(interaction, repos);
       }
     } catch (error) {
       logger.error({ err: String(error) }, 'unhandled interaction error');
@@ -54,6 +66,22 @@ async function main(): Promise<void> {
           .reply({ content: '❌ Something went wrong.', flags: MessageFlags.Ephemeral })
           .catch(() => undefined);
       }
+    }
+  });
+
+  // Greet a new server with what to do next. Without this the bot joins
+  // silently and an admin has to already know `/setup` exists.
+  client.on(Events.GuildCreate, async (guild) => {
+    logger.info({ guildId: guild.id, name: guild.name }, 'added to guild');
+    try {
+      const channel = findWelcomeChannel(guild);
+      if (channel) {
+        await channel.send({ content: renderWelcome() });
+      } else {
+        logger.warn({ guildId: guild.id }, 'joined a guild with no channel I can post in');
+      }
+    } catch (error) {
+      logger.warn({ guildId: guild.id, err: String(error) }, 'could not post welcome message');
     }
   });
 

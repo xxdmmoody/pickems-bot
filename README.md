@@ -46,8 +46,18 @@ number, so a restart mid-scan cannot double-post.
 2. Copy the **token** and the **application ID**.
 3. Under **Bot → Privileged Gateway Intents**, enable **Server Members Intent**. The bot reads the
    participant role to know who owes picks — without this it sees almost nobody.
-4. Invite it with the `bot` and `applications.commands` scopes and permissions to view the channel, send
-   messages and mention roles.
+4. Invite it with the `bot` and `applications.commands` scopes.
+
+**Invite permissions.** Two options:
+
+| | Permissions | What you get |
+| --- | --- | --- |
+| **Recommended** | View Channels, Send Messages, Mention Everyone, **Manage Channels**, **Manage Roles** | `/setup` creates the channel and role for you, and players self-enrol with `/join` |
+| Minimal | View Channels, Send Messages, Mention Everyone | You create the channel and role yourself and assign the role to every player by hand |
+
+Manage Channels and Manage Roles are only ever used to create `#pickems`, create `@Pickems`, and add or
+remove that one role. Discord also prevents a bot from touching any role above its own, so PicksBot
+cannot grant itself or anyone else elevated permissions.
 
 ### 2. Install and configure
 
@@ -69,16 +79,41 @@ slots, which is what lets one set of logos serve all three guilds.
 
 ### 3. Configure each server
 
+When the bot joins it posts a short welcome explaining what to do. An admin then runs:
+
 ```
-/setup channel:#pickems role:@Pickems timezone:America/Chicago
-/openweek            # posts the current week immediately
+/setup
+```
+
+That's the whole thing. With no arguments it finds or creates a `#pickems` channel and a `@Pickems`
+role, saves the configuration, and posts a pinned **Join / leave the pool** button in the channel so
+players enrol themselves — no need to hand the role out one by one.
+
+To point it at your own channel or role instead, name either or both:
+
+```
+/setup channel:#football role:@Degenerates timezone:America/New_York
+```
+
+It reuses whatever you name and only creates what's missing, so it's safe to re-run at any time.
+
+If the bot lacks Manage Channels or Manage Roles, `/setup` says exactly which permission is missing and
+gives you the command to run once you've made the channel or role yourself. It also refuses a channel it
+cannot post in, or a role sitting above its own in the hierarchy — both of which would otherwise fail
+silently later.
+
+Then post the first week whenever you like:
+
+```
+/openweek            # or just wait for Tuesday at noon
 ```
 
 ## Commands
 
 | Command | Who | What |
 | --- | --- | --- |
-| `/setup` | admin | Set the channel, participant role and timezone |
+| `/setup` | admin | Set up the bot; creates the channel and role if you have none |
+| `/join` · `/leave` | anyone | Join or leave the pool (same as the pinned button) |
 | `/mypicks` | anyone | Your picks for the current week |
 | `/standings` | anyone | Season standings |
 | `/schedule` | anyone | This week's matchups and lines |
@@ -109,7 +144,7 @@ any time the data looks wrong.
 ## Development
 
 ```bash
-npm test           # 144 tests, no network or Discord needed
+npm test           # 165 tests, no network or Discord needed
 npm run typecheck
 npm run dev        # watch mode
 npm run espn:smoke # live check that ESPN still returns what we depend on
