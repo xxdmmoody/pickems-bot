@@ -11,7 +11,7 @@ this game used to run on.
 | --- | --- |
 | **Tuesday 12:00** | Grades last week, posts results + standings + recap, fetches and snapshots the new week's lines, posts the schedule and the four pick messages tagging the participant role |
 | **Thursday 12:00** and **Sunday 11:00** | Tags anyone still missing picks, naming what they owe |
-| **Wed / Sat / Sun 21:00** | Scans for significant line movement (see below) |
+| **every night 21:00** | Scans for significant line movement, but only when games are due in the next 24h |
 | every 15 minutes | Removes options for games that have kicked off |
 | **any time** | A player selects from a dropdown and gets a private confirmation |
 
@@ -33,6 +33,12 @@ before each game day and treats a move as significant when the **spread swings 3
 3+**, or the **favorite and underdog flip**. When one fires the bot updates that game's line for everyone,
 edits the schedule and the dropdowns to match, and posts an alert @-mentioning only the players whose
 picks touch that game.
+
+"The night before each game day" is derived from the actual schedule, not a fixed set of weekdays: the
+job runs every night at 21:00 and does nothing unless a game is due in the next 24 hours. NFL weeks are
+not uniform — the 2026 season opens on a **Wednesday**, late-season weeks add Saturday games, and there
+are Friday and holiday fixtures. A hardcoded Wed/Sat/Sun schedule would have missed all of them. Use
+`/checklines` to run a scan immediately.
 
 Guards worth knowing: a line is never rewritten after kickoff; a game ESPN returns no odds for keeps its
 stored line (a missing payload is never read as a move to zero); and alerts are unique per game and
@@ -108,6 +114,11 @@ Then post the first week whenever you like:
 /openweek            # or just wait for Tuesday at noon
 ```
 
+**Setting up mid-week?** `/openweek` picks up whatever week is live and posts every game that still has
+a line, so a bot set up on a Tuesday evening — or a Thursday — works fine. Games that have already
+kicked off simply don't appear in the dropdowns. When the Tuesday job next fires it notices the week was
+already posted and won't duplicate it.
+
 ## Commands
 
 | Command | Who | What |
@@ -123,6 +134,7 @@ Then post the first week whenever you like:
 | `/gradeweek <week>` | admin | Grade or re-grade a week and post results |
 | `/refreshodds [week]` | admin | Refetch scores and schedule from ESPN |
 | `/linemoves [week]` | admin | Audit trail of applied line movements |
+| `/checklines` | admin | Check for line movement now instead of waiting for tonight |
 
 ## Data source
 
@@ -144,7 +156,7 @@ any time the data looks wrong.
 ## Development
 
 ```bash
-npm test           # 165 tests, no network or Discord needed
+npm test           # 176 tests, no network or Discord needed
 npm run typecheck
 npm run dev        # watch mode
 npm run espn:smoke # live check that ESPN still returns what we depend on

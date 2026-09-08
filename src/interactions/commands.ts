@@ -22,11 +22,20 @@ import {
   resolveSetupRole,
   toggleParticipation,
 } from './onboarding.js';
+import { runLineWatch } from '../jobs/lineWatch.js';
 import { gradeWeek } from '../services/grade.js';
 import { participantIds } from '../services/participants.js';
 import { describeSlate, findIncomplete } from '../services/picks.js';
 import { postWeek, postResultsAndStandings, postRecap } from '../services/poster.js';
-import { byeTeams, currentWeek, loadWeek, syncWeek, FIRST_WEEK, LAST_WEEK } from '../services/week.js';
+import {
+  byeTeams,
+  currentWeek,
+  loadWeek,
+  resolveWeekToOpen,
+  syncWeek,
+  FIRST_WEEK,
+  LAST_WEEK,
+} from '../services/week.js';
 
 const adminOnly = PermissionFlagsBits.ManageGuild;
 
@@ -93,6 +102,10 @@ export const commandDefinitions = [
     .setDescription('Admin: show recorded line movements for a week')
     .setDefaultMemberPermissions(adminOnly)
     .addIntegerOption(weekOption(false)),
+  new SlashCommandBuilder()
+    .setName('checklines')
+    .setDescription('Admin: check for significant line movement now, instead of waiting for tonight')
+    .setDefaultMemberPermissions(adminOnly),
 ].map((builder) => builder.toJSON());
 
 export interface CommandContext {
@@ -137,6 +150,8 @@ export async function handleCommand(
         return await handleRefreshOdds(interaction, ctx);
       case 'linemoves':
         return await handleLineMoves(interaction, ctx);
+      case 'checklines':
+        return await handleCheckLines(interaction, ctx);
       default:
         await interaction.reply({ content: 'Unknown command.', flags: MessageFlags.Ephemeral });
     }
@@ -346,15 +361,21 @@ async function handleOpenWeek(interaction: ChatInputCommandInteraction, ctx: Com
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
+  // Same resolution the Tuesday job uses, so running this manually a few days
+  // into a week does not re-open the week that just finished.
+  const target = await resolveWeekToOpen(ctx.espn, ctx.repos);
   const explicit = interaction.options.getInteger('week');
-  const live = await currentWeek(ctx.espn);
-  const season = live.season;
-  const week = explicit ?? live.week;
+  const season = target.season;
+  const week = explicit ?? target.week;
 
   await syncWeek(ctx.espn, ctx.repos, season, week);
   await postWeek(ctx.client, ctx.repos, config, season, week);
 
-  await respond(interaction, `✅ Posted Week ${week} picks in <#${config.channelId}>.`);
+  const entries = loadWeek(ctx.repos, season, week);
+  await respond(
+    interaction,
+    `✅ Posted Week ${week} in <#${config.channelId}> — ${entries.length} games with lines.`
+  );
 }
 
 async function handleGradeWeek(interaction: ChatInputCommandInteraction, ctx: CommandContext): Promise<void> {
@@ -420,6 +441,32 @@ async function handleLineMoves(interaction: ChatInputCommandInteraction, ctx: Co
   });
 
   await respond(interaction, [`**Line movements — Week ${target.week}**`, '', ...lines].join('\n'));
+}
+
+/**
+ * Runs the line watch immediately rather than waiting for the nightly scan.
+ * Useful right after setup, or when news breaks close to a kickoff.
+ */
+async function handleCheckLines(
+  interaction: ChatInputCommandInteraction,
+  ctx: CommandContext
+): Promise<void> {
+  const target = resolveWeek(interaction, ctx);
+  if (!target) {
+    await respond(interaction, 'No week has been opened yet.');
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const applied = await runLineWatch(ctx.client, ctx.repos, ctx.espn, target.season, target.week);
+
+  await respond(
+    interaction,
+    applied > 0
+      ? `✅ Applied ${applied} significant line move${applied === 1 ? '' : 's'} and alerted the affected players.`
+      : `✅ Checked Week ${target.week} — no significant movement since the last check.`
+  );
 }
 
 function isValidTimezone(timezone: string): boolean {

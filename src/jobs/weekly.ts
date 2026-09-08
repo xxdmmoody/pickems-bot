@@ -7,7 +7,7 @@ import { gradeWeek } from '../services/grade.js';
 import { participantIds } from '../services/participants.js';
 import { findIncomplete } from '../services/picks.js';
 import { announce, postRecap, postResultsAndStandings, postWeek, refreshPickMessages } from '../services/poster.js';
-import { currentWeek, syncWeek, FIRST_WEEK, LAST_WEEK } from '../services/week.js';
+import { resolveWeekToOpen, syncWeek, FIRST_WEEK, LAST_WEEK } from '../services/week.js';
 
 export interface JobContext {
   client: Client;
@@ -30,9 +30,9 @@ export interface JobContext {
  * of the message burst already include last week.
  */
 export async function runOpenWeek(ctx: JobContext, overrideWeek?: number): Promise<void> {
-  const live = await currentWeek(ctx.espn);
-  const season = live.season;
-  const week = overrideWeek ?? live.week;
+  const target = await resolveWeekToOpen(ctx.espn, ctx.repos);
+  const season = target.season;
+  const week = overrideWeek ?? target.week;
 
   if (week < FIRST_WEEK || week > LAST_WEEK) {
     logger.info({ season, week }, 'outside the regular season; skipping open-week job');
@@ -76,6 +76,16 @@ async function openWeekForGuild(
 
     await postResultsAndStandings(ctx.client, ctx.repos, config, season, previousWeek);
     await postRecap(ctx.client, ctx.repos, config, season, previousWeek);
+  }
+
+  // An admin who already ran /openweek manually — as they must for the first
+  // week of a season, since the Tuesday job has usually passed by then — should
+  // not get a duplicate set of pick messages when the cron next fires. The
+  // second set would carry its own dropdowns, and picks made on the stale
+  // message would still save, so this is about clarity as much as tidiness.
+  if (ctx.repos.messages.get(config.guildId, season, week, 'SCHEDULE')) {
+    logger.info({ guildId: config.guildId, season, week }, 'week already posted; not posting again');
+    return;
   }
 
   await postWeek(ctx.client, ctx.repos, config, season, week);

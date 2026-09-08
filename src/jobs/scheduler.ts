@@ -1,6 +1,6 @@
 import cron, { type ScheduledTask } from 'node-cron';
 import { logger } from '../logger.js';
-import { currentWeek } from '../services/week.js';
+import { currentWeek, hasGamesWithin } from '../services/week.js';
 import { runLineWatch } from './lineWatch.js';
 import { runLockRefresh, runNudge, runOpenWeek, runScoreRefresh, type JobContext } from './weekly.js';
 
@@ -22,8 +22,9 @@ export function startScheduler(ctx: JobContext, timezone: string): ScheduledTask
     schedule('0 12 * * 4', options, 'nudge-thursday', () => runNudge(ctx)),
     schedule('0 11 * * 0', options, 'nudge-sunday', () => runNudge(ctx)),
 
-    // Wednesday, Saturday and Sunday at 21:00 — the night before each game day.
-    schedule('0 21 * * 3,6,0', options, 'line-watch', () => watchLines(ctx)),
+    // Every night at 21:00, but only acts when games are actually due within the
+    // next 24 hours — see watchLines.
+    schedule('0 21 * * *', options, 'line-watch', () => watchLines(ctx)),
 
     // Every 15 minutes — drop options for games that just kicked off. Cheap, and
     // far simpler than scheduling a one-off timer per distinct kickoff.
@@ -56,8 +57,22 @@ function schedule(
   );
 }
 
+/**
+ * Runs the line watch on the nights it matters.
+ *
+ * Fires nightly, then checks the real schedule for games due in the next 24
+ * hours. That is what "the night before each game day" actually means: it covers
+ * a Wednesday season opener, a Friday or Saturday game, and a holiday fixture,
+ * none of which a hardcoded set of weekdays would catch.
+ */
 async function watchLines(ctx: JobContext): Promise<void> {
   const target = ctx.repos.games.latestWeek() ?? (await currentWeek(ctx.espn));
+
+  if (!hasGamesWithin(ctx.repos, target.season, target.week, Date.now())) {
+    logger.info({ season: target.season, week: target.week }, 'no games in the next 24h; skipping line watch');
+    return;
+  }
+
   const applied = await runLineWatch(ctx.client, ctx.repos, ctx.espn, target.season, target.week);
   logger.info({ season: target.season, week: target.week, applied }, 'line watch complete');
 }

@@ -47,6 +47,51 @@ export async function currentWeek(espn: EspnClient): Promise<{ season: number; w
   return { season: parsed.season, week: parsed.week };
 }
 
+/**
+ * The week the Tuesday job should open, and its synced data.
+ *
+ * ESPN does not roll its "current week" over the instant a week ends — on a
+ * Tuesday it can still be reporting the week whose last game finished on Monday
+ * night. Taking that number at face value would re-post the week just played and
+ * leave the new one unopened until the following Tuesday, quietly costing a week
+ * of the season. So when every game of ESPN's current week has already kicked
+ * off, advance to the next one.
+ */
+export async function resolveWeekToOpen(
+  espn: EspnClient,
+  repos: Repos
+): Promise<{ season: number; week: number }> {
+  const live = await currentWeek(espn);
+  const parsed = await syncWeek(espn, repos, live.season, live.week);
+
+  const everyGameStarted = parsed.games.length > 0 && parsed.games.every((g) => g.state !== 'pre');
+  if (everyGameStarted && live.week < LAST_WEEK) {
+    return { season: live.season, week: live.week + 1 };
+  }
+
+  return live;
+}
+
+/**
+ * Whether any game is due within `windowMs` of `now` and has not started.
+ *
+ * This is what makes "the night before each game day" mean the actual schedule
+ * rather than a hardcoded set of weekdays. NFL weeks are not uniform: 2026 opens
+ * on a Wednesday, late-season weeks add Saturday games, and there are Friday and
+ * holiday games — all of which a fixed Wed/Sat/Sun cron would miss entirely.
+ */
+export function hasGamesWithin(
+  repos: Repos,
+  season: number,
+  week: number,
+  now: number,
+  windowMs = 24 * 60 * 60 * 1000
+): boolean {
+  return repos.games
+    .byWeek(season, week)
+    .some((game) => game.state === 'pre' && game.kickoff > now && game.kickoff <= now + windowMs);
+}
+
 /** The stored week, joined and ready to render. */
 export function loadWeek(repos: Repos, season: number, week: number): GameWithLine[] {
   return joinGamesAndLines(repos.games.byWeek(season, week), repos.lines.byWeek(season, week));
