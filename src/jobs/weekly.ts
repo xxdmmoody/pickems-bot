@@ -140,11 +140,40 @@ export async function runLockRefresh(ctx: JobContext, now = Date.now()): Promise
   }
 }
 
-/** Pulls fresh scores so `/standings` and the recap reflect games as they finish. */
-export async function runScoreRefresh(ctx: JobContext): Promise<void> {
+/**
+ * Pulls fresh scores so `/standings` and the recap reflect games as they finish.
+ *
+ * Runs hourly every day and skips when nothing is happening. Gating on the
+ * schedule rather than on the day of the week is what makes this work for a
+ * Wednesday opener, a Friday game or a Christmas fixture — the previous version
+ * was pinned to Sun/Mon/Thu/Sat and would not have refreshed a Wednesday or
+ * Friday game's score at all.
+ */
+export async function runScoreRefresh(ctx: JobContext, now = Date.now()): Promise<void> {
   const target = ctx.repos.games.latestWeek();
   if (!target) return;
 
+  if (!hasLiveOrRecentGames(ctx.repos, target.season, target.week, now)) {
+    logger.debug({ season: target.season, week: target.week }, 'nothing live; skipping score refresh');
+    return;
+  }
+
   ctx.espn.clearCache();
   await syncWeek(ctx.espn, ctx.repos, target.season, target.week);
+}
+
+/**
+ * Whether a game is in progress, or kicked off recently enough that its final
+ * score may not have landed yet. An NFL game runs a bit over three hours; six
+ * gives room for overtime and ESPN's own lag.
+ */
+function hasLiveOrRecentGames(repos: Repos, season: number, week: number, now: number): boolean {
+  const RECENT_MS = 6 * 60 * 60 * 1000;
+
+  return repos.games.byWeek(season, week).some((game) => {
+    if (game.state === 'in') return true;
+    // Kicked off within the window and we still have no final score for it.
+    const started = game.kickoff <= now && game.kickoff > now - RECENT_MS;
+    return started && (game.state === 'pre' || game.awayScore === null);
+  });
 }

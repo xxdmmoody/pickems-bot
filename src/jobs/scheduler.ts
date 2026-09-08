@@ -2,6 +2,7 @@ import cron, { type ScheduledTask } from 'node-cron';
 import { logger } from '../logger.js';
 import { currentWeek, hasGamesWithin } from '../services/week.js';
 import { runLineWatch } from './lineWatch.js';
+import { runScheduleSync } from './scheduleSync.js';
 import { runLockRefresh, runNudge, runOpenWeek, runScoreRefresh, type JobContext } from './weekly.js';
 
 /**
@@ -22,6 +23,14 @@ export function startScheduler(ctx: JobContext, timezone: string): ScheduledTask
     schedule('0 12 * * 4', options, 'nudge-thursday', () => runNudge(ctx)),
     schedule('0 11 * * 0', options, 'nudge-sunday', () => runNudge(ctx)),
 
+    // Tuesday 06:00 — re-read the schedule before the week opens at noon, so the
+    // week is posted against the league's current plan rather than last week's.
+    schedule('0 6 * * 2', options, 'schedule-sync-weekly', () => syncSchedule(ctx)),
+
+    // 08:00 daily — catch flex moves and holiday reshuffles as they are
+    // announced, rather than discovering them the night before.
+    schedule('0 8 * * *', options, 'schedule-sync-daily', () => syncSchedule(ctx)),
+
     // Every night at 21:00, but only acts when games are actually due within the
     // next 24 hours — see watchLines.
     schedule('0 21 * * *', options, 'line-watch', () => watchLines(ctx)),
@@ -30,8 +39,9 @@ export function startScheduler(ctx: JobContext, timezone: string): ScheduledTask
     // far simpler than scheduling a one-off timer per distinct kickoff.
     schedule('*/15 * * * *', options, 'lock-refresh', () => runLockRefresh(ctx)),
 
-    // Hourly through game days — keep scores current for /standings and recaps.
-    schedule('30 * * * 0,1,4,6', options, 'score-refresh', () => runScoreRefresh(ctx)),
+    // Hourly, every day. Which days have games is a property of the schedule,
+    // not of the calendar — runScoreRefresh skips when nothing is live.
+    schedule('30 * * * *', options, 'score-refresh', () => runScoreRefresh(ctx)),
   ];
 
   logger.info({ timezone, jobs: tasks.length }, 'scheduler started');
@@ -68,6 +78,12 @@ function schedule(
 async function watchLines(ctx: JobContext): Promise<void> {
   const target = ctx.repos.games.latestWeek() ?? (await currentWeek(ctx.espn));
 
+  // Refresh the schedule before deciding whether tonight matters. The gate below
+  // reads stored kickoff times, so without this it would be deciding whether to
+  // fetch fresh data using data that might itself be stale — and a game moved
+  // into tomorrow would never trigger a scan.
+  await runScheduleSync(ctx.client, ctx.repos, ctx.espn, target.season, target.week);
+
   if (!hasGamesWithin(ctx.repos, target.season, target.week, Date.now())) {
     logger.info({ season: target.season, week: target.week }, 'no games in the next 24h; skipping line watch');
     return;
@@ -75,4 +91,16 @@ async function watchLines(ctx: JobContext): Promise<void> {
 
   const applied = await runLineWatch(ctx.client, ctx.repos, ctx.espn, target.season, target.week);
   logger.info({ season: target.season, week: target.week, applied }, 'line watch complete');
+}
+
+/** The standalone schedule check, for the morning jobs. */
+async function syncSchedule(ctx: JobContext): Promise<void> {
+  const target = ctx.repos.games.latestWeek();
+  if (!target) {
+    logger.info('no week stored yet; skipping schedule sync');
+    return;
+  }
+
+  const changes = await runScheduleSync(ctx.client, ctx.repos, ctx.espn, target.season, target.week);
+  logger.info({ season: target.season, week: target.week, changes: changes.length }, 'schedule sync complete');
 }

@@ -80,6 +80,54 @@ function spreadText(spread: number, game: Game): string {
   return `${favorite} ${favoriteNumber(spread)}`;
 }
 
+/**
+ * The schedule-change alert, posted when a kickoff moves.
+ *
+ *   📅 **Schedule change** — 🐦 Ravens @ Dolphins 🐬
+ *
+ *   Kickoff moved from Sun 12:00 PM CDT to **Sun 7:20 PM CDT** — 7h 20m later.
+ *   Your pick on this game now locks at the new time.
+ *   @USER1 (OVER)
+ */
+export function renderScheduleChangeAlert(
+  game: Game,
+  oldKickoff: string,
+  newKickoff: string,
+  deltaMs: number,
+  affected: readonly AffectedPicker[]
+): string {
+  const direction = deltaMs > 0 ? 'later' : 'earlier';
+  const lines: string[] = [
+    `📅 ${bold('Schedule change')} — ${renderMatchup(game.awayAbbr, game.homeAbbr)}`,
+    '',
+    `Kickoff moved from ${oldKickoff} to ${bold(newKickoff)} — ${humanizeDuration(Math.abs(deltaMs))} ${direction}.`,
+    '',
+    deltaMs > 0
+      ? 'You now have longer to pick this game.'
+      : `⏰ ${bold('This game locks sooner than it used to.')}`,
+  ];
+
+  if (affected.length > 0) {
+    lines.push('', affected.map(describePicker).join(' '));
+  }
+
+  return joinLines(lines);
+}
+
+/** "7h 20m", "45m", "2d 3h" — compact enough for one line of an alert. */
+function humanizeDuration(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const mins = minutes % 60;
+
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (mins > 0 && days === 0) parts.push(`${mins}m`);
+  return parts.join(' ') || '0m';
+}
+
 /** Who a move affects: anyone whose pick is on this game. */
 export function affectedBy(
   gameId: string,

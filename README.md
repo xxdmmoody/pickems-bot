@@ -9,10 +9,13 @@ this game used to run on.
 
 | When (guild timezone, default America/Chicago) | What happens |
 | --- | --- |
+| **Tuesday 06:00** | Re-reads the schedule from ESPN before the week opens |
 | **Tuesday 12:00** | Grades last week, posts results + standings + recap, fetches and snapshots the new week's lines, posts the schedule and the four pick messages tagging the participant role |
 | **Thursday 12:00** and **Sunday 11:00** | Tags anyone still missing picks, naming what they owe |
+| **every morning 08:00** | Re-reads the schedule; announces any kickoff that moved (see below) |
 | **every night 21:00** | Scans for significant line movement, but only when games are due in the next 24h |
 | every 15 minutes | Removes options for games that have kicked off |
+| hourly | Refreshes scores while games are live or recently finished |
 | **any time** | A player selects from a dropdown and gets a private confirmation |
 
 ## The rules it enforces
@@ -39,6 +42,22 @@ job runs every night at 21:00 and does nothing unless a game is due in the next 
 not uniform — the 2026 season opens on a **Wednesday**, late-season weeks add Saturday games, and there
 are Friday and holiday fixtures. A hardcoded Wed/Sat/Sun schedule would have missed all of them. Use
 `/checklines` to run a scan immediately.
+
+### Schedule changes
+
+The schedule itself is not fixed once published. Sunday games get flex-scheduled into the night slot,
+games move for weather, and the Christmas and end-of-season weeks land on unusual days. So the bot
+re-reads the schedule from ESPN every morning at 08:00, again on Tuesday before the week opens, and once
+more each night before it decides whether to scan lines.
+
+When a kickoff moves by 30 minutes or more it posts a notice naming the game, the old and new times, and
+the players who picked it, then rebuilds the pick dropdowns.
+
+This is a correctness issue as much as a courtesy one: **picks lock at kickoff**, so a stale kickoff time
+means the bot either locks a game early or keeps taking picks on a game already under way. A game that
+moved earlier is called out prominently for the same reason. Everything downstream — which nights get a
+line scan, when scores are refreshed, when options disappear — reads the stored schedule, so keeping it
+accurate is what makes the rest adapt on its own. `/checkschedule` runs the check on demand.
 
 Guards worth knowing: a line is never rewritten after kickoff; a game ESPN returns no odds for keeps its
 stored line (a missing payload is never read as a move to zero); and alerts are unique per game and
@@ -135,6 +154,7 @@ already posted and won't duplicate it.
 | `/refreshodds [week]` | admin | Refetch scores and schedule from ESPN |
 | `/linemoves [week]` | admin | Audit trail of applied line movements |
 | `/checklines` | admin | Check for line movement now instead of waiting for tonight |
+| `/checkschedule` | admin | Re-read the schedule now and announce any kickoff changes |
 
 ## Data source
 
@@ -156,7 +176,7 @@ any time the data looks wrong.
 ## Development
 
 ```bash
-npm test           # 176 tests, no network or Discord needed
+npm test           # 187 tests, no network or Discord needed
 npm run typecheck
 npm run dev        # watch mode
 npm run espn:smoke # live check that ESPN still returns what we depend on

@@ -23,6 +23,7 @@ import {
   toggleParticipation,
 } from './onboarding.js';
 import { runLineWatch } from '../jobs/lineWatch.js';
+import { runScheduleSync } from '../jobs/scheduleSync.js';
 import { gradeWeek } from '../services/grade.js';
 import { participantIds } from '../services/participants.js';
 import { describeSlate, findIncomplete } from '../services/picks.js';
@@ -103,6 +104,10 @@ export const commandDefinitions = [
     .setDefaultMemberPermissions(adminOnly)
     .addIntegerOption(weekOption(false)),
   new SlashCommandBuilder()
+    .setName('checkschedule')
+    .setDescription('Admin: re-read the schedule from ESPN and announce any kickoff changes')
+    .setDefaultMemberPermissions(adminOnly),
+  new SlashCommandBuilder()
     .setName('checklines')
     .setDescription('Admin: check for significant line movement now, instead of waiting for tonight')
     .setDefaultMemberPermissions(adminOnly),
@@ -152,6 +157,8 @@ export async function handleCommand(
         return await handleLineMoves(interaction, ctx);
       case 'checklines':
         return await handleCheckLines(interaction, ctx);
+      case 'checkschedule':
+        return await handleCheckSchedule(interaction, ctx);
       default:
         await interaction.reply({ content: 'Unknown command.', flags: MessageFlags.Ephemeral });
     }
@@ -466,6 +473,32 @@ async function handleCheckLines(
     applied > 0
       ? `✅ Applied ${applied} significant line move${applied === 1 ? '' : 's'} and alerted the affected players.`
       : `✅ Checked Week ${target.week} — no significant movement since the last check.`
+  );
+}
+
+/**
+ * Re-reads the schedule now, rather than waiting for the morning sync. Handy
+ * when the league announces a flex move or a holiday game gets shuffled.
+ */
+async function handleCheckSchedule(
+  interaction: ChatInputCommandInteraction,
+  ctx: CommandContext
+): Promise<void> {
+  const target = resolveWeek(interaction, ctx);
+  if (!target) {
+    await respond(interaction, 'No week has been opened yet.');
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const changes = await runScheduleSync(ctx.client, ctx.repos, ctx.espn, target.season, target.week);
+
+  await respond(
+    interaction,
+    changes.length > 0
+      ? `✅ Applied ${changes.length} kickoff change${changes.length === 1 ? '' : 's'} and announced them.`
+      : `✅ Week ${target.week} matches ESPN — no kickoff changes.`
   );
 }
 
