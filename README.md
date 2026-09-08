@@ -73,6 +73,18 @@ number, so a restart mid-scan cannot double-post.
    participant role to know who owes picks — without this it sees almost nobody.
 4. Invite it with the `bot` and `applications.commands` scopes.
 
+**Which credential is which.** The portal shows four and only two are used:
+
+| Credential | Where | Goes in |
+| --- | --- | --- |
+| **Bot Token** | **Bot** tab -> `Reset Token` (shown once) | `DISCORD_TOKEN` |
+| **Application ID** | General Information, a 17-20 digit number | `DISCORD_APPLICATION_ID` |
+| Public Key | General Information, 64 hex chars | *not used* — for HTTP interaction endpoints; this bot uses the gateway |
+| Client Secret | OAuth2 tab | *not used* |
+
+The Public Key sits next to the Application ID and is easy to grab by mistake, so startup validates the
+shape of both values and names the mix-up rather than failing with a bare 401.
+
 **Invite permissions.** Two options:
 
 | | Permissions | What you get |
@@ -91,7 +103,7 @@ try to compile from source and need a full toolchain.
 
 ```bash
 npm install
-cp .env.example .env      # fill in DISCORD_TOKEN and DISCORD_APPLICATION_ID
+cp .env.example .env      # see the credential notes inside it
 npm run commands:register # set DEV_GUILD_ID first for instant registration while testing
 npm run emojis:upload     # one-time: uploads the 32 team logos as application emojis
 npm run build
@@ -176,7 +188,7 @@ any time the data looks wrong.
 ## Development
 
 ```bash
-npm test           # 187 tests, no network or Discord needed
+npm test           # 195 tests, no network or Discord needed
 npm run typecheck
 npm run dev        # watch mode
 npm run espn:smoke # live check that ESPN still returns what we depend on
