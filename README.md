@@ -206,6 +206,60 @@ ESPN payloads captured in `src/espn/fixtures/`.
 
 ## Deployment (Raspberry Pi 5)
 
+### Check Node first
+
+`better-sqlite3` ships no prebuild for Node 20 or older, so anything below **Node 22** tries to compile
+from source and needs a full toolchain.
+
+```bash
+node --version     # must be v22 or newer
+uname -m           # expect aarch64 (64-bit Pi OS)
+```
+
+**If you already run other things under pm2, do not blindly upgrade Node system-wide** — native modules
+are built against a specific Node ABI, and bumping the system Node can break an existing bot until you
+`npm rebuild` it. Install Node 22 alongside with [nvm](https://github.com/nvm-sh/nvm) and point pm2 at
+that binary for this app only, using the `interpreter` line in `deploy/ecosystem.config.cjs`. Each pm2
+app can run its own Node version.
+
+### With pm2
+
+```bash
+git clone https://github.com/<you>/pickems-bot.git
+cd pickems-bot
+
+npm ci                        # devDependencies are needed to build
+cp .env.example .env
+nano .env                     # token + application ID (see the notes inside)
+
+npm run build
+node dist/scripts/register-commands.js   # one-time
+node dist/scripts/upload-emojis.js       # one-time, optional
+
+pm2 start deploy/ecosystem.config.cjs
+pm2 save                      # persist across reboots
+pm2 logs pickems-bot
+```
+
+`pm2 startup` (once per machine) makes pm2 itself come back after a reboot; `pm2 save` records which
+apps it should bring with it.
+
+Edit `cwd` in `deploy/ecosystem.config.cjs` to match where you cloned it. The bot reads `.env` and the
+database by relative path, so a wrong `cwd` surfaces as "no token" rather than anything clearer.
+
+**Leave `instances: 1` and `exec_mode: 'fork'` alone.** Cluster mode would open a second Discord gateway
+connection and run a second copy of every cron job, so the bot would post each week's picks twice and
+have two processes writing one SQLite file.
+
+Once built, the one-time scripts run as plain JS, so you can drop the build tooling if you want a
+smaller install:
+
+```bash
+npm prune --omit=dev          # optional; re-run `npm ci` before your next build
+```
+
+### With systemd instead
+
 ```bash
 sudo cp deploy/pickems-bot.service /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -214,6 +268,15 @@ journalctl -u pickems-bot -f
 ```
 
 Edit the unit's `User`, `WorkingDirectory` and `ExecStart` paths first. Logs go to journald as JSON.
+Use one or the other — running both would give you two bots.
+
+### Updating
+
+```bash
+git pull && npm ci && npm run build && pm2 restart pickems-bot
+```
+
+Run `node dist/scripts/register-commands.js` again only if the slash commands changed.
 
 Back up `data/pickems.db` — it holds every pick, result and line snapshot:
 
