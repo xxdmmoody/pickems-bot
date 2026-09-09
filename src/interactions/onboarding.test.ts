@@ -9,6 +9,8 @@ import {
   findWelcomeChannel,
   resolveSetupChannel,
   resolveSetupRole,
+  storedChannel,
+  storedRole,
   toggleParticipation,
 } from './onboarding.js';
 
@@ -95,6 +97,7 @@ function fakeGuild(options: FakeOptions = {}): Guild {
     },
     channels: {
       cache: channelCache,
+      fetch: async (id: string) => channelCache.get(id) ?? null,
       create: async ({ name }: { name: string }) => {
         created.channels.push(name);
         return fakeChannel({ id: 'new-channel', name });
@@ -363,5 +366,41 @@ describe('participation storage', () => {
 
     expect(repos.guilds.listActive()).toHaveLength(1);
     expect(repos.guilds.get('g')).toMatchObject({ channelId: 'c2', roleId: 'r2', timezone: 'America/Denver' });
+  });
+});
+
+/**
+ * Re-running /setup to change one setting must carry the others forward. These
+ * cover the lookups that make that possible; the wiring lives in handleSetup.
+ */
+describe('keeping existing settings on a re-run', () => {
+  it('finds the channel already configured, so an omitted option can reuse it', async () => {
+    const guild = fakeGuild({ channels: [{ id: 'c9', name: 'football-talk' }] });
+    const found = await storedChannel(guild, 'c9');
+
+    expect(found?.id).toBe('c9');
+    // Crucially it is NOT the default-named channel, so a timezone-only re-run
+    // cannot silently relocate the bot to a new #pickems.
+    expect(found?.name).not.toBe(DEFAULT_CHANNEL_NAME);
+  });
+
+  it('finds the role already configured, spaces and emoji included', async () => {
+    const guild = fakeGuild({ roles: [{ id: 'r42', name: 'ball bois 🏈', position: 1 }] });
+    expect((await storedRole(guild, 'r42'))?.name).toBe('ball bois 🏈');
+  });
+
+  it('returns null for a channel that has been deleted, falling back to find-or-create', async () => {
+    expect(await storedChannel(fakeGuild(), 'gone')).toBeNull();
+  });
+
+  it('returns null for a deleted role', async () => {
+    expect(await storedRole(fakeGuild(), 'gone')).toBeNull();
+  });
+
+  it('ignores a configured id that is no longer a text channel', async () => {
+    const guild = fakeGuild({ channels: [{ id: 'c9', name: 'football-talk' }] });
+    // A voice channel would come back from the fetch but must not be accepted.
+    (guild.channels.cache.get('c9') as unknown as { type: number }).type = 2;
+    expect(await storedChannel(guild, 'c9')).toBeNull();
   });
 });

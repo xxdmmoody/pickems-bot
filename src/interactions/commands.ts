@@ -21,6 +21,8 @@ import {
   renderSetupSummary,
   resolveSetupChannel,
   resolveSetupRole,
+  storedChannel,
+  storedRole,
   toggleParticipation,
 } from './onboarding.js';
 import { runLineWatch } from '../jobs/lineWatch.js';
@@ -207,27 +209,42 @@ function resolveWeek(
  * existing channel or role still works and skips creation.
  */
 async function handleSetup(interaction: ChatInputCommandInteraction, ctx: CommandContext): Promise<void> {
-  const timezone = interaction.options.getString('timezone') ?? ctx.defaultTimezone;
+  const guild = interaction.guild;
+  if (!guild) return;
+
+  // Anything not named keeps its current value. Re-running /setup to change one
+  // setting must not quietly reset the others — without this, changing the
+  // timezone alone would treat the omitted channel and role as "find or create
+  // #pickems / @Pickems" and move the bot off the ones actually in use.
+  const existing = ctx.repos.guilds.get(guild.id);
+
+  const timezone =
+    interaction.options.getString('timezone') ?? existing?.timezone ?? ctx.defaultTimezone;
   if (!isValidTimezone(timezone)) {
     await respond(interaction, `❌ \`${timezone}\` is not a valid IANA timezone.`);
     return;
   }
 
-  const guild = interaction.guild;
-  if (!guild) return;
-
   // Creating a channel or role can take a moment; defer so the token holds.
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const providedChannel = interaction.options.getChannel('channel') as TextChannel | null;
+  // A configured channel or role that has since been deleted falls back to the
+  // find-or-create path, which is the sensible recovery.
+  const providedChannel =
+    (interaction.options.getChannel('channel') as TextChannel | null) ??
+    (existing ? await storedChannel(guild, existing.channelId) : null);
+
   const channelResult = await resolveSetupChannel(guild, providedChannel);
   if (!channelResult.ok) {
     await respond(interaction, `❌ ${channelResult.reason}`);
     return;
   }
 
-  const providedRole = interaction.options.getRole('role');
-  const roleResult = await resolveSetupRole(guild, providedRole as Role | null);
+  const providedRole =
+    (interaction.options.getRole('role') as Role | null) ??
+    (existing ? await storedRole(guild, existing.roleId) : null);
+
+  const roleResult = await resolveSetupRole(guild, providedRole);
   if (!roleResult.ok) {
     await respond(interaction, `❌ ${roleResult.reason}`);
     return;

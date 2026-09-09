@@ -180,6 +180,34 @@ function warn(guild: Guild, role: Role): { warning?: string } {
   return problem ? { warning: problem } : {};
 }
 
+/**
+ * Looks up a previously configured channel, or null if it has been deleted.
+ *
+ * Used so that re-running `/setup` to change one setting keeps the others.
+ * Without this, `/setup timezone:...` would treat the omitted channel as "find
+ * or create #pickems" and silently move the bot out of the channel the server
+ * had been using.
+ */
+export async function storedChannel(guild: Guild, channelId: string): Promise<TextChannel | null> {
+  try {
+    const channel = guild.channels.cache.get(channelId) ?? (await guild.channels.fetch(channelId));
+    return channel && channel.type === ChannelType.GuildText ? (channel as TextChannel) : null;
+  } catch {
+    // Deleted, or no longer visible to the bot. Either way the caller should
+    // fall back to find-or-create rather than fail the whole setup.
+    return null;
+  }
+}
+
+/** The role counterpart of `storedChannel`. */
+export async function storedRole(guild: Guild, roleId: string): Promise<Role | null> {
+  try {
+    return guild.roles.cache.get(roleId) ?? (await guild.roles.fetch(roleId));
+  } catch {
+    return null;
+  }
+}
+
 /* --------------------------------------------------------------- messaging */
 
 /** Posted automatically when the bot joins a server. */
