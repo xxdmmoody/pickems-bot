@@ -85,16 +85,25 @@ number, so a restart mid-scan cannot double-post.
 The Public Key sits next to the Application ID and is easy to grab by mistake, so startup validates the
 shape of both values and names the mix-up rather than failing with a bare 401.
 
-**Invite permissions.** Two options:
+**Invite permissions.** `node dist/scripts/register-commands.js` prints a ready-made invite URL with
+everything below already selected, so you can just use that.
 
-| | Permissions | What you get |
-| --- | --- | --- |
-| **Recommended** | View Channels, Send Messages, Mention Everyone, **Manage Channels**, **Manage Roles** | `/setup` creates the channel and role for you, and players self-enrol with `/join` |
-| Minimal | View Channels, Send Messages, Mention Everyone | You create the channel and role yourself and assign the role to every player by hand |
+| Permission | Why |
+| --- | --- |
+| View Channels, Send Messages | Post at all |
+| **Read Message History** | Fetch its own earlier messages, which is how locked options are removed from a dropdown and how a line move updates numbers already on screen |
+| **Manage Messages** | Pin the join prompt during `/setup` |
+| Mention Everyone | Tag the participant role when picks open |
+| Manage Channels, Manage Roles | Let `/setup` create `#pickems` and `@Pickems`, and let players self-enrol with `/join` |
 
-Manage Channels and Manage Roles are only ever used to create `#pickems`, create `@Pickems`, and add or
-remove that one role. Discord also prevents a bot from touching any role above its own, so PicksBot
-cannot grant itself or anyone else elevated permissions.
+Read Message History and Manage Messages are the two easy ones to miss, and they fail quietly rather than
+loudly — the bot keeps posting fine, but dropdowns stop updating when games kick off. If you would rather
+create the channel and role yourself, drop Manage Channels and Manage Roles and hand out the role by
+hand; everything else still works.
+
+Manage Channels and Manage Roles are only ever used to create those two things and to add or remove that
+one role. Discord also prevents a bot from touching any role above its own, so PicksBot cannot grant
+itself or anyone else elevated permissions.
 
 ### 2. Install and configure
 
