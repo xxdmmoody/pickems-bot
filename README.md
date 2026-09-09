@@ -244,8 +244,8 @@ pm2 logs pickems-bot
 `pm2 startup` (once per machine) makes pm2 itself come back after a reboot; `pm2 save` records which
 apps it should bring with it.
 
-Edit `cwd` in `deploy/ecosystem.config.cjs` to match where you cloned it. The bot reads `.env` and the
-database by relative path, so a wrong `cwd` surfaces as "no token" rather than anything clearer.
+The config derives its working directory from its own location, so it needs no editing wherever you
+clone the repo.
 
 **Leave `instances: 1` and `exec_mode: 'fork'` alone.** Cluster mode would open a second Discord gateway
 connection and run a second copy of every cron job, so the bot would post each week's picks twice and

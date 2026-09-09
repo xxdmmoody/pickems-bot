@@ -6,6 +6,16 @@
 //   pm2 start deploy/ecosystem.config.cjs
 //   pm2 save
 //
+const { resolve } = require('node:path');
+
+// The repository root, derived from this file's own location rather than
+// hardcoded. The bot reads .env and the SQLite database by relative path, so a
+// wrong working directory surfaces as "no token" and an empty database rather
+// than anything clearer — and a hardcoded path is the easiest way to get that
+// wrong. Deriving it means this works wherever the repo is cloned, and keeps
+// working after `pm2 resurrect` on reboot.
+const ROOT = resolve(__dirname, '..');
+
 module.exports = {
   apps: [
     {
@@ -14,11 +24,7 @@ module.exports = {
       // Compiled output, not the TypeScript source — run `npm run build` first.
       script: 'dist/src/index.js',
 
-      // Adjust to wherever you cloned it. This also sets the working directory
-      // the process runs in, which matters: the bot reads .env and the SQLite
-      // database by relative path, so a wrong cwd means "no token" and an empty
-      // database rather than a clear error.
-      cwd: '/home/pi/pickems-bot',
+      cwd: ROOT,
 
       // ---------------------------------------------------------------------
       // Both of these are load-bearing. Do not switch to cluster mode.
