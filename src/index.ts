@@ -92,7 +92,7 @@ async function main(): Promise<void> {
     logger.info({ guildId: guild.id }, 'removed from guild; deactivated its configuration');
   });
 
-  await client.login(config.DISCORD_TOKEN);
+  await login(client, config.DISCORD_TOKEN);
 
   const tasks = startScheduler({ client, repos, espn }, config.DEFAULT_TIMEZONE);
 
@@ -106,6 +106,43 @@ async function main(): Promise<void> {
 
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
+}
+
+/**
+ * Connects to Discord, translating the two startup failures that are certain to
+ * happen once on a fresh install into instructions.
+ *
+ * "Used disallowed intents" in particular reads like a bug in the bot, when it
+ * actually means a checkbox in the developer portal is off.
+ */
+async function login(client: Client, token: string): Promise<void> {
+  try {
+    await client.login(token);
+  } catch (error) {
+    const message = String(error);
+
+    if (/disallowed intents/i.test(message)) {
+      throw new Error(
+        'Discord refused the connection: the Server Members Intent is not enabled.\n' +
+          '  The bot needs it to see who holds the participant role — without it, reminders reach\n' +
+          '  nobody and every player grades as though they never picked.\n' +
+          '  Fix: https://discord.com/developers/applications -> your app -> Bot ->\n' +
+          '       Privileged Gateway Intents -> turn on "Server Members Intent" -> Save Changes,\n' +
+          '       then restart the bot.'
+      );
+    }
+
+    if (/token/i.test(message) || /401/.test(message)) {
+      throw new Error(
+        'Discord rejected the token.\n' +
+          '  DISCORD_TOKEN is the value from the Bot tab ("Reset Token"), not the Public Key.\n' +
+          '  If it was reset in the portal, the old value stops working immediately.\n' +
+          `  Discord said: ${message}`
+      );
+    }
+
+    throw error;
+  }
 }
 
 /**
