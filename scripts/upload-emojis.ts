@@ -11,7 +11,7 @@
  *   npm run emojis:upload
  */
 import { REST, Routes } from 'discord.js';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { TEAMS } from '../src/domain/teams.js';
@@ -34,6 +34,9 @@ async function main(): Promise<void> {
   logger.info({ existing: byName.size }, 'existing application emojis');
 
   const map: Record<string, string> = {};
+  let reused = 0;
+  let uploaded = 0;
+  const failed: string[] = [];
 
   for (const team of TEAMS) {
     const name = emojiNameFor(team.abbr);
@@ -41,6 +44,7 @@ async function main(): Promise<void> {
 
     if (already) {
       map[team.abbr] = `<:${name}:${already.id}>`;
+      reused += 1;
       continue;
     }
 
@@ -49,21 +53,47 @@ async function main(): Promise<void> {
       continue;
     }
 
-    const image = await fetchAsDataUri(team.logo);
-    const created = (await rest.post(Routes.applicationEmojis(appId), {
-      body: { name, image },
-    })) as ApplicationEmoji;
+    // One team failing — a rate limit, a bad response from the CDN — should not
+    // discard the other 31 uploads. Record it and carry on; re-running picks up
+    // where this left off, because uploads already done are reused above.
+    try {
+      const image = await fetchAsDataUri(team.logo);
+      const created = (await rest.post(Routes.applicationEmojis(appId), {
+        body: { name, image },
+      })) as ApplicationEmoji;
 
-    map[team.abbr] = `<:${name}:${created.id}>`;
-    logger.info({ team: team.abbr, name, id: created.id }, 'uploaded emoji');
+      map[team.abbr] = `<:${name}:${created.id}>`;
+      uploaded += 1;
+      logger.info({ team: team.abbr, name, id: created.id }, 'uploaded emoji');
+    } catch (error) {
+      failed.push(team.abbr);
+      logger.error({ team: team.abbr, err: describe(error) }, 'emoji upload failed for team');
+    }
 
     // Emoji creation is rate limited; a small gap keeps a 32-item run smooth.
     await new Promise((resolve) => setTimeout(resolve, 750));
   }
 
   const outputPath = join(dirname(config.DATABASE_PATH), 'emoji-map.json');
+
+  // The bot creates this directory when it opens the database, but this script
+  // never touches the database — so on a fresh clone it does not exist yet, and
+  // writing here would fail after every emoji had already been uploaded.
+  mkdirSync(dirname(outputPath), { recursive: true });
+
   writeFileSync(outputPath, `${JSON.stringify(map, null, 2)}\n`);
-  logger.info({ outputPath, count: Object.keys(map).length }, 'wrote emoji map');
+  logger.info({ outputPath, mapped: Object.keys(map).length, uploaded, reused }, 'wrote emoji map');
+
+  if (failed.length > 0) {
+    logger.warn(
+      { failed },
+      'some teams did not upload; re-run this script to retry just those'
+    );
+  }
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** Discord's emoji endpoint takes an image as a base64 data URI, not a URL. */
