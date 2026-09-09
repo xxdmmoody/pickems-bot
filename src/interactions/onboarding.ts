@@ -22,7 +22,7 @@ export const JOIN_BUTTON_ID = 'pickems:join';
 /* ------------------------------------------------------- resource resolution */
 
 export type Resolution<T> =
-  | { ok: true; value: T; action: 'provided' | 'reused' | 'created' }
+  | { ok: true; value: T; action: 'provided' | 'reused' | 'created'; warning?: string }
   | { ok: false; reason: string };
 
 /**
@@ -99,15 +99,19 @@ function channelUsabilityProblem(guild: Guild, channel: TextChannel): string | n
  * than discovered by every player who tries to join.
  */
 export async function resolveSetupRole(guild: Guild, provided: Role | null): Promise<Resolution<Role>> {
+  // A role that already exists is usable even if the bot cannot assign it. The
+  // game only needs to *read* who holds the role, which comes from the members
+  // intent, not from Manage Roles. Losing the ability to assign costs the
+  // self-service /join button, not the season — so this warns rather than
+  // blocking setup, which matters when whoever is installing the bot cannot
+  // grant that permission and the server owner is unavailable.
   if (provided) {
-    const problem = roleAssignabilityProblem(guild, provided);
-    return problem ? { ok: false, reason: problem } : { ok: true, value: provided, action: 'provided' };
+    return { ok: true, value: provided, action: 'provided', ...warn(guild, provided) };
   }
 
   const existing = guild.roles.cache.find((r) => r.name === DEFAULT_ROLE_NAME);
   if (existing) {
-    const problem = roleAssignabilityProblem(guild, existing);
-    return problem ? { ok: false, reason: problem } : { ok: true, value: existing, action: 'reused' };
+    return { ok: true, value: existing, action: 'reused', ...warn(guild, existing) };
   }
 
   if (!guild.members.me?.permissions.has(PermissionFlagsBits.ManageRoles)) {
@@ -134,28 +138,46 @@ export async function resolveSetupRole(guild: Guild, provided: Role | null): Pro
 }
 
 /**
- * Whether the bot can hand this role out. Discord only lets a bot manage roles
- * strictly below its own highest role.
+ * Whether the bot can hand this role out.
+ *
+ * Two separate requirements, both of which Discord enforces: the Manage Roles
+ * permission, and the role sitting strictly below the bot's own highest role.
  */
-function roleAssignabilityProblem(guild: Guild, role: Role): string | null {
+export function canAssignRole(guild: Guild, role: Role): boolean {
+  const me = guild.members.me;
+  if (!me) return false;
+  if (!me.permissions.has(PermissionFlagsBits.ManageRoles)) return false;
+  return me.roles.highest.comparePositionTo(role) > 0;
+}
+
+/** Explains why the bot cannot assign a role, or null when it can. */
+function roleAssignmentProblem(guild: Guild, role: Role): string | null {
   const me = guild.members.me;
   if (!me) return null;
 
   if (!me.permissions.has(PermissionFlagsBits.ManageRoles)) {
     return (
-      `I need the **Manage Roles** permission to add and remove @${role.name}.\n` +
-      'Grant it and run `/setup` again, or players will have to be given the role by hand.'
+      `I do not have **Manage Roles**, so I cannot add or remove @${role.name} myself. ` +
+      'Everything else works — scores, standings, reminders — but somebody with the permission ' +
+      'has to give players the role by hand. Grant it later and re-run `/setup` to enable `/join`.'
     );
   }
 
   if (me.roles.highest.comparePositionTo(role) <= 0) {
     return (
-      `@${role.name} sits above my own role, so Discord will not let me assign it.\n` +
-      'Drag my role above it in **Server Settings → Roles**, then run `/setup` again.'
+      `@${role.name} sits above my own role, so Discord will not let me assign it. ` +
+      'Drag my role above it in **Server Settings → Roles** and re-run `/setup` to enable `/join`. ' +
+      'Until then the role has to be given out by hand.'
     );
   }
 
   return null;
+}
+
+/** Shapes the assignment problem as the optional `warning` on a Resolution. */
+function warn(guild: Guild, role: Role): { warning?: string } {
+  const problem = roleAssignmentProblem(guild, role);
+  return problem ? { warning: problem } : {};
 }
 
 /* --------------------------------------------------------------- messaging */
@@ -186,7 +208,8 @@ export function renderSetupSummary(
   role: Role,
   timezone: string,
   channelAction: string,
-  roleAction: string
+  roleAction: string,
+  roleWarning?: string
 ): string {
   const describe = (action: string, what: string) => {
     if (action === 'created') return `✨ Created ${what}`;
@@ -194,17 +217,27 @@ export function renderSetupSummary(
     return `✅ Using ${what}`;
   };
 
-  return [
+  const lines = [
     '**PicksBot is set up.**',
     '',
     describe(channelAction, `<#${channel.id}> for picks and results`),
     describe(roleAction, `<@&${role.id}> as the players role`),
     `🕒 Times are ${timezone}`,
-    '',
-    '**Next:**',
-    `• Players join with \`/join\` (or the button in <#${channel.id}>)`,
-    '• Run `/openweek` to post this week immediately, or wait for Tuesday at noon',
-  ].join('\n');
+  ];
+
+  if (roleWarning) {
+    lines.push('', `⚠️ ${roleWarning}`);
+  }
+
+  lines.push('', '**Next:**');
+  lines.push(
+    roleWarning
+      ? `• Give players the <@&${role.id}> role, then they can pick`
+      : `• Players join with \`/join\` (or the button in <#${channel.id}>)`
+  );
+  lines.push('• Run `/openweek` to post this week immediately, or wait for Tuesday at noon');
+
+  return lines.join('\n');
 }
 
 /** The message carrying the join button, posted into the picks channel at setup. */
@@ -259,7 +292,7 @@ export async function toggleParticipation(
     return '❌ The players role has been deleted. An admin needs to run `/setup` again.';
   }
 
-  const problem = roleAssignabilityProblem(guild, role);
+  const problem = roleAssignmentProblem(guild, role);
   if (problem) return `❌ ${problem}`;
 
   try {

@@ -16,6 +16,7 @@ import { renderResults, renderStandings } from '../render/results.js';
 import { renderSchedule } from '../render/schedule.js';
 import {
   buildJoinRow,
+  canAssignRole,
   renderJoinPrompt,
   renderSetupSummary,
   resolveSetupChannel,
@@ -243,20 +244,30 @@ async function handleSetup(interaction: ChatInputCommandInteraction, ctx: Comman
   });
 
   // A persistent join button means players enrol themselves rather than an admin
-  // handing out the role one by one.
-  try {
-    const prompt = await channel.send({
-      content: renderJoinPrompt(role.id),
-      components: [buildJoinRow()],
-    });
-    await prompt.pin().catch(() => undefined);
-  } catch (error) {
-    logger.warn({ guildId: guild.id, err: String(error) }, 'could not post the join prompt');
+  // handing out the role one by one — but only post it if the bot can actually
+  // assign the role. A button that always errors is worse than no button.
+  if (canAssignRole(guild, role)) {
+    try {
+      const prompt = await channel.send({
+        content: renderJoinPrompt(role.id),
+        components: [buildJoinRow()],
+      });
+      await prompt.pin().catch(() => undefined);
+    } catch (error) {
+      logger.warn({ guildId: guild.id, err: String(error) }, 'could not post the join prompt');
+    }
   }
 
   await respond(
     interaction,
-    renderSetupSummary(channel, role, timezone, channelResult.action, roleResult.action)
+    renderSetupSummary(
+      channel,
+      role,
+      timezone,
+      channelResult.action,
+      roleResult.action,
+      roleResult.warning
+    )
   );
 }
 

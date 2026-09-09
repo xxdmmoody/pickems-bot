@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { openDatabase } from '../db/index.js';
 import { createRepos, type Repos } from '../db/repos.js';
 import {
+  canAssignRole,
   DEFAULT_CHANNEL_NAME,
   DEFAULT_ROLE_NAME,
   findWelcomeChannel,
@@ -186,24 +187,68 @@ describe('resolveSetupRole', () => {
     expect(created.roles).toEqual([]);
   });
 
-  it('rejects a role positioned above the bot, which Discord will not let it assign', async () => {
-    const guild = fakeGuild({ botRolePosition: 5 });
-    const provided = fakeRole({ id: 'r9', name: 'Admins', position: 50 });
-    const result = await resolveSetupRole(guild, provided);
+  it('accepts an existing role even without Manage Roles, warning instead of blocking', async () => {
+    // Whoever installs the bot may not be able to grant Manage Roles. The game
+    // only needs to READ who holds the role, so setup must still succeed —
+    // losing /join is a downgrade, not a blocker.
+    const guild = fakeGuild({
+      botPermissions: [PermissionFlagsBits.ManageChannels],
+      roles: [{ id: 'r1', name: 'Players', position: 1 }],
+    });
+    const result = await resolveSetupRole(guild, fakeRole({ id: 'r1', name: 'Players', position: 1 }));
 
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toContain('above my own role');
-      expect(result.reason).toContain('Server Settings');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.warning).toContain('by hand');
+      expect(result.warning).toContain('Everything else works');
     }
   });
 
-  it('explains what to do without Manage Roles', async () => {
+  it('accepts a role positioned above the bot, warning that /join will not work', async () => {
+    const guild = fakeGuild({ botRolePosition: 5 });
+    const result = await resolveSetupRole(guild, fakeRole({ id: 'r9', name: 'Admins', position: 50 }));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.warning).toContain('above my own role');
+      expect(result.warning).toContain('Server Settings');
+    }
+  });
+
+  it('reports no warning when the bot can assign the role', async () => {
+    const guild = fakeGuild({ roles: [{ id: 'r1', name: DEFAULT_ROLE_NAME, position: 1 }] });
+    const result = await resolveSetupRole(guild, null);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.warning).toBeUndefined();
+  });
+
+  it('still refuses to CREATE a role without Manage Roles, since that genuinely cannot work', async () => {
     const guild = fakeGuild({ botPermissions: [PermissionFlagsBits.ManageChannels] });
     const result = await resolveSetupRole(guild, null);
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toContain('Manage Roles');
+    if (!result.ok) {
+      expect(result.reason).toContain('Manage Roles');
+      expect(result.reason).toContain('/setup role:@your-role');
+    }
+  });
+});
+
+describe('canAssignRole', () => {
+  it('is true with the permission and a lower role', () => {
+    const guild = fakeGuild({ botRolePosition: 100 });
+    expect(canAssignRole(guild, fakeRole({ id: 'r1', name: 'P', position: 1 }))).toBe(true);
+  });
+
+  it('is false without Manage Roles', () => {
+    const guild = fakeGuild({ botPermissions: [] });
+    expect(canAssignRole(guild, fakeRole({ id: 'r1', name: 'P', position: 1 }))).toBe(false);
+  });
+
+  it('is false when the role outranks the bot', () => {
+    const guild = fakeGuild({ botRolePosition: 5 });
+    expect(canAssignRole(guild, fakeRole({ id: 'r1', name: 'P', position: 50 }))).toBe(false);
   });
 });
 

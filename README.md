@@ -97,9 +97,13 @@ everything below already selected, so you can just use that.
 | Manage Channels, Manage Roles | Let `/setup` create `#pickems` and `@Pickems`, and let players self-enrol with `/join` |
 
 Read Message History and Manage Messages are the two easy ones to miss, and they fail quietly rather than
-loudly — the bot keeps posting fine, but dropdowns stop updating when games kick off. If you would rather
-create the channel and role yourself, drop Manage Channels and Manage Roles and hand out the role by
-hand; everything else still works.
+loudly — the bot keeps posting fine, but dropdowns stop updating when games kick off.
+
+**Manage Channels and Manage Roles are optional.** Without them, point `/setup` at a channel and a role
+that already exist. Setup succeeds, warns that it cannot hand the role out, and skips the join button;
+somebody assigns the role manually instead. Scores, standings, reminders, line and schedule alerts are all
+unaffected — the bot only needs to *read* who holds the role. Grant the permissions later and re-run
+`/setup` to turn `/join` on.
 
 Manage Channels and Manage Roles are only ever used to create those two things and to add or remove that
 one role. Discord also prevents a bot from touching any role above its own, so PicksBot cannot grant
@@ -197,7 +201,7 @@ any time the data looks wrong.
 ## Development
 
 ```bash
-npm test           # 195 tests, no network or Discord needed
+npm test           # 200 tests, no network or Discord needed
 npm run typecheck
 npm run dev        # watch mode
 npm run espn:smoke # live check that ESPN still returns what we depend on
