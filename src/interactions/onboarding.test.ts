@@ -215,6 +215,26 @@ describe('resolveSetupRole', () => {
     }
   });
 
+  it('accepts a role whose name has spaces and emoji', async () => {
+    // Roles are stored and mentioned by id, never by name, so a display name
+    // like this is only ever echoed back in text.
+    const ballBois = fakeRole({ id: 'r42', name: 'ball bois 🏈', position: 1 });
+    const result = await resolveSetupRole(fakeGuild({ roles: [{ id: 'r42', name: 'ball bois 🏈', position: 1 }] }), ballBois);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.id).toBe('r42');
+      expect(result.action).toBe('provided');
+    }
+  });
+
+  it('does not create @Pickems when an existing role was named', async () => {
+    // Pointing setup at your own role must not leave a stray second role behind.
+    const ballBois = fakeRole({ id: 'r42', name: 'ball bois 🏈', position: 1 });
+    await resolveSetupRole(fakeGuild(), ballBois);
+    expect(created.roles).toEqual([]);
+  });
+
   it('reports no warning when the bot can assign the role', async () => {
     const guild = fakeGuild({ roles: [{ id: 'r1', name: DEFAULT_ROLE_NAME, position: 1 }] });
     const result = await resolveSetupRole(guild, null);
